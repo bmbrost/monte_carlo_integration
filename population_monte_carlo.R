@@ -239,10 +239,10 @@ wts <- function(y,mu,sigma,p,  # calculate importance weights
 
 	prior <- rowSums(dnorm(mu,priors[[1]],sigma/priors[[2]],log=TRUE))  # prior
 	lik <-  apply(mu,1,function(x) sum(dmix(y,x,sigma,p,sum=TRUE,log=TRUE)))  # likelihood
-	q <- dnorm(mu[,1],q[[1]][1],q[[2]][1],log=TRUE)+ # pdf of importance function
+	d.q <- dnorm(mu[,1],q[[1]][1],q[[2]][1],log=TRUE)+ # pdf of importance function
 		dnorm(mu[,2],q[[1]][2],q[[2]][2],log=TRUE)
 	m <- max(lik)  # for "log-sum-exp" trick to avoid numerical underflow
-	w <- exp(prior+lik-q-m)  # importance weights
+	w <- exp(prior+lik-d.q-m)  # importance weights
 	w <- w/sum(w)  # normalize importance weights
 	w
 }
