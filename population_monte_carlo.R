@@ -225,20 +225,21 @@ abline(v=mean(y),lty=2,lwd=2,col=2)
 
 rm(list=ls())
 
+library(akima)
+
 dmix <- function(x,mu,sigma,p,sum=TRUE,log=TRUE){  # PDF of Guassian mixture distribution
 # browser()
 	d <- length(mu)  # number of mixture components
-	out <- sapply(1:d,function(y) p[y]*dnorm(x,mu[y],sigma[y]))
+	out <- sapply(1:d,function(y) p[y]*dnorm(x,mu[y],sigma))
 	if(sum==TRUE) out <- rowSums(out)
 	if(log==TRUE) out <- log(out)
 	out
 }
 
-wts <- function(y,mu,sigma,p,  # calculate importance weights
+get.wts <- function(y,mu,sigma,p,  # calculate importance weights
 	q=list(mu,sigma),priors=list(mu,lambda)){  
-
 	prior <- rowSums(dnorm(mu,priors[[1]],sigma/priors[[2]],log=TRUE))  # prior
-	lik <-  apply(mu,1,function(x) sum(dmix(y,x,sigma,p,sum=TRUE,log=TRUE)))  # likelihood
+	lik <-  apply(mu,1,function(x) sum(dmix(y,x,sigma,p,sum=TRUE,log=TRUE)))  # likelihood	
 	d.q <- dnorm(mu[,1],q[[1]][1],q[[2]][1],log=TRUE)+ # pdf of importance function
 		dnorm(mu[,2],q[[1]][2],q[[2]][2],log=TRUE)
 	m <- max(lik)  # for "log-sum-exp" trick to avoid numerical underflow
@@ -252,14 +253,15 @@ wts <- function(y,mu,sigma,p,  # calculate importance weights
 ### Simulate observations
 ###
 
-n <- 20 # sample size
-mu.true <- c(-1,1)  # mean
-sigma.true <- c(0.5,0.5)  # standarad deviation
-p.true <- c(0.33,1-0.33)  # mixture proportions
+n <- 1000 # sample size
+mu.true <- c(0,2)  # mean
+sigma.true <- 0.5  # standarad deviation
+p.true <- c(0.2,1-0.2)  # mixture proportions
+J <- length(mu.true)  # number of mixture components in model
 
-idx <- sample(1:length(mu.true),n,replace=TRUE,prob=p.true)  # mixture component idx
-y <- rnorm(n,mu.true[idx],sigma.true[idx])  # simulated observations
-hist(y,breaks=20)
+idx <- sample(1:J,n,replace=TRUE,prob=p.true)  # mixture component idx
+y <- rnorm(n,mu.true[idx],sigma.true)  # simulated observations
+hist(y,breaks=100)
 
 
 ###
@@ -267,28 +269,20 @@ hist(y,breaks=20)
 ###
 
 theta <- 0  # prior mean
-lambda <- 0.1  # hyperparameter for prior sd
+tau <- 10  # hyperparameter for prior sd
 
+a <- 0
+b <- 10
 
 ###
 ### Step 0: Standard importance sampling scheme
 ###
 
 n.samp <- 10000  # sample size from importance function
-mu1.q <- mu2.q <- 0  # means of importance functions
-sigma1.q <- sigma2.q <- 10  # sd of importance functions
-mu1 <- rnorm(n.samp,mu1.q,sigma1.q)  # sample mu1 from importance function
-mu2 <- rnorm(n.samp,mu2.q,sigma2.q)  # sample mu2 from importance function
-w <- wts(y,cbind(mu1,mu2),sigma.true,p.true,  # importance weights
-	list(c(mu1.q,mu2.q),c(sigma1.q,sigma2.q)),priors=list(theta,lambda))
 
-# plot(cumsum(w)/c(1:n.samp),type="l")
+q.mu <- list(mean=rep(0,J),sd=rep(10,J))  # parameters of importance fxn for mu
+q.sigma <- list(mean=1,sd=0.5)  # parameters of importance fxn for sigma
 
-# Initial IS approximation to posterior distribution
-mu.is <- sample(1:n.samp,10000,w,replace=TRUE)
-mu.is <- c(mu1[mu.is],mu2[mu.is])
-hist(mu.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25))
-abline(v=mu.true,lty=2)
 
 ###
 ### Stesp 1-K: Update importance function, sample mu, calculate importance weights
@@ -296,24 +290,64 @@ abline(v=mu.true,lty=2)
 
 K <- 10  # number of iterations
 for(k in 1:K){ # loop through iterations
-	mu1.q <- sum(w*mu1)  # update mean of importance function
-	mu2.q <- sum(w*mu2)  # update mean of importance function
-	sigma1.q <- sqrt(sum(w*(mu1-mu1.q)^2))  # update sd of importance function
-	sigma2.q <- sqrt(sum(w*(mu2-mu2.q)^2))  # update sd of importance function
-	mu1 <- rnorm(n.samp,mu1.q,sigma1.q)  # sample mu1 from importance function
-	mu2 <- rnorm(n.samp,mu2.q,sigma2.q)  # sample mu2 from importance function
-	w <- wts(y,cbind(mu1,mu2),sigma.true,p.true,  # importance weights
-		list(c(mu1.q,mu2.q),c(sigma1.q,sigma2.q)),priors=list(theta,lambda))
+	
+	###
+	### Update mu
+	### 
+
+	# Sample mu
+	mu <- sapply(1:J,function(x) rnorm(n.samp,q.mu$mean[x],q.mu$sd[x]))
+
+	# Calculate importance weights for mu
+	loglik <- apply(mu,1,function(x) sum(dmix(y,x,q.sigma$mean,p.true,sum=TRUE,log=TRUE)))
+	prior <- rowSums(dnorm(mu,theta,tau,log=TRUE))
+	q.density <- rowSums(sapply(1:J,function(x) dnorm(mu[,x],q.mu$mean[x],q.mu$sd[x],log=TRUE)))
+	mu.wts <- exp(prior+loglik-q.density-max(loglik))
+	mu.wts <- mu.wts/sum(mu.wts)
+
+	# contour(interp(x=mu[,1],y=mu[,2],z=wts))
+	# abline(v=mu.true[1],h=mu.true[2],col=2)
+
+	# Update parameters of importance function for mu
+	q.mu <- list(mean=colSums(mu.wts*mu),
+		sd=sqrt(colSums(mu.wts*t(apply(mu,1,function(x) x-q.mu$mean))^2)))
+
+
+	###
+	### Update sigma
+	###
+
+	# Sample sigma
+	sigma <- exp(rnorm(n.samp,log(q.sigma$mean),q.sigma$sd))
+	# mean(sigma)
+	# hist(sigma,breaks=100)
+	
+	# Calculate importance weights for sigma
+	loglik <- sapply(sigma,function(x) sum(dmix(y,q.mu$mean,x,p.true,sum=TRUE,log=TRUE)))
+	prior <- dunif(sigma,a,b,log=TRUE)
+	q.density <- dnorm(log(sigma),log(q.sigma$mean),q.sigma$sd,log=TRUE)
+	sigma.wts <- exp(prior+loglik-q.density-max(loglik))
+	sigma.wts <- sigma.wts/sum(sigma.wts)
+
+	# Update parameters of importance function for sigma
+	q.sigma <- list(mean=sum(sigma.wts*sigma), 
+		sd=sqrt(sum(sigma.wts*(sigma-q.sigma$sd)^2)))
 }
 
+
+
 # Posterior via importance sampling
-mu.is <- sample(1:n.samp,10000,w,replace=TRUE)
-mu.is <- c(mu1[mu.is],mu2[mu.is])
-hist(mu.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25))
-abline(v=mu.true,lty=2)
+mu.is <- sample(1:n.samp,10000,mu.wts,replace=TRUE)
+mu.is <- c(mu[mu.is,])
+hist(mu.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=mu.true,lty=2)
 
+sigma.is <- sample(1:n.samp,10000,sigma.wts,replace=TRUE)
+sigma.is <- sigma[sigma.is]
+hist(sigma.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=sigma.true,lty=2)
 
-
-
-
-
+# Class memberships
+lik <- dmix(y,q.mu$mean,q.sigma$mean,p.true,sum=FALSE,log=FALSE)
+p <- lik/rowSums(lik)
+idx <- apply(p,1,function(x) sample(1:J,1,prob=x))
+boxplot(y~idx);abline(h=mu.true,col=2)
+plot(y,p[,1]);points(y,p[,2],col=2)
