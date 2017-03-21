@@ -344,8 +344,9 @@ sigma.is <- sigma[sigma.is]
 hist(sigma.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=sigma.true,lty=2)
 
 # Class memberships
-lik <- dmix(y,q.mu$mean,q.sigma$mean,p.true,sum=FALSE,log=FALSE)
-p <- lik/rowSums(lik)
-idx <- apply(p,1,function(x) sample(1:J,1,prob=x))
+lik <- sapply(1:J,function(x) dnorm(y,q.mu$mean[x],q.sigma$mean))
+test <- lik/rowSums(lik)
+idx <- apply(test,1,function(x) sample(1:J,1,prob=x))
+table(idx)
 boxplot(y~idx);abline(h=mu.true,col=2)
-plot(y,p[,1]);points(y,p[,2],col=2)
+plot(y,test[,1]);points(y,test[,2],col=2)
