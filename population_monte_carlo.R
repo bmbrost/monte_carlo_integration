@@ -226,11 +226,12 @@ abline(v=mean(y),lty=2,lwd=2,col=2)
 rm(list=ls())
 
 library(akima)
+library(MCMCpack)
 
-dmix <- function(x,mu,sigma,p,sum=TRUE,log=TRUE){  # PDF of Guassian mixture distribution
+dnorm.mix <- function(y,mu,sigma,p,sum=TRUE,log=TRUE){  # PDF of Guassian mixture distribution
 # browser()
-	d <- length(mu)  # number of mixture components
-	out <- sapply(1:d,function(y) p[y]*dnorm(x,mu[y],sigma))
+	J <- length(p)  # number of mixture components
+	out <- sapply(1:J,function(x) p[x]*dnorm(y,mu[x],sigma,log=FALSE))
 	if(sum==TRUE) out <- rowSums(out)
 	if(log==TRUE) out <- log(out)
 	out
@@ -256,11 +257,12 @@ hist(y,breaks=100)
 ### Prior specification (a la Cappe et al. 2004)
 ###
 
-theta <- 0  # prior mean
-tau <- 10  # hyperparameter for prior sd
+theta <- 0  # prior mean for mu
+tau <- 10  # prior standard deviation for mu
 
-a <- 0
-b <- 10
+a <- 0  # lower bound for uniform prior on sigma
+b <- 10  # upper bound for uniform prior on sigma
+
 
 ###
 ### Step 0: Standard importance sampling scheme
@@ -268,7 +270,8 @@ b <- 10
 
 n.samp <- 10000  # sample size from importance function
 
-q.mu <- list(mean=rep(0,J),sd=rep(10,J))  # parameters of importance fxn for mu
+q.mu <- list(mean=rep(0,J),sd=rep(2,J),p=rep(1/J,J))  # parameters of importance fxn for mu
+# q.mu <- list(mean=mu.true,sd=rep(sigma.true,J),p=p.true)  # parameters of importance fxn for mu
 q.sigma <- list(mean=1,sd=0.5)  # parameters of importance fxn for sigma
 
 
@@ -283,24 +286,31 @@ for(k in 1:K){ # loop through iterations
 	### Update mu
 	### 
 
-	# Sample mu
+	# Sample mu from importance function
 	mu <- sapply(1:J,function(x) rnorm(n.samp,q.mu$mean[x],q.mu$sd[x]))
 
+	# Calculate posterior probability of mixture component membership
+	rho.tmp <- sapply(1:J,function(x) p.true[x]*dnorm(mu[,x],q.mu$mean[x],q.mu$sd[x],log=FALSE))
+	q.density <- log(rowSums(rho.tmp))
+	rho <- exp(log(rho.tmp)-q.density)
+	
 	# Calculate importance weights for mu
-	loglik <- apply(mu,1,function(x) sum(dmix(y,x,q.sigma$mean,p.true,sum=TRUE,log=TRUE)))
+	log.lik <- apply(mu,1,function(x) sum(dnorm.mix(y,x,q.sigma$mean,p.true,sum=TRUE,log=TRUE)))
 	prior <- rowSums(dnorm(mu,theta,tau,log=TRUE))
-	q.density <- rowSums(sapply(1:J,function(x) dnorm(mu[,x],q.mu$mean[x],q.mu$sd[x],log=TRUE)))
-	mu.wts <- exp(prior+loglik-q.density-max(loglik))
+	mu.wts <- exp(log.lik+prior-q.density-max(log.lik))
 	mu.wts <- mu.wts/sum(mu.wts)
 
 	# contour(interp(x=mu[,1],y=mu[,2],z=wts))
 	# abline(v=mu.true[1],h=mu.true[2],col=2)
 
 	# Update parameters of importance function for mu
-	q.mu <- list(mean=colSums(mu.wts*mu),
-		sd=sqrt(colSums(mu.wts*t(apply(mu,1,function(x) x-q.mu$mean))^2)))
+	p.tmp <- colSums(mu.wts*rho)
+	q.mu <- list(mean=colSums((mu.wts*mu)*rho)/p.tmp,
+		sd=sqrt(colSums(mu.wts*t(apply(mu,1,function(x) x-q.mu$mean))^2*rho)/p.tmp))
+# p.tmp
+# q.mu	
 
-
+	
 	###
 	### Update sigma
 	###
@@ -311,24 +321,24 @@ for(k in 1:K){ # loop through iterations
 	# hist(sigma,breaks=100)
 	
 	# Calculate importance weights for sigma
-	loglik <- sapply(sigma,function(x) sum(dmix(y,q.mu$mean,x,p.true,sum=TRUE,log=TRUE)))
+	log.lik <- sapply(sigma,function(x) sum(dnorm.mix(y,q.mu$mean,x,p.true,sum=TRUE,log=TRUE)))
 	prior <- dunif(sigma,a,b,log=TRUE)
 	q.density <- dnorm(log(sigma),log(q.sigma$mean),q.sigma$sd,log=TRUE)
-	sigma.wts <- exp(prior+loglik-q.density-max(loglik))
+	sigma.wts <- exp(prior+log.lik-q.density-max(log.lik))
 	sigma.wts <- sigma.wts/sum(sigma.wts)
 
 	# Update parameters of importance function for sigma
 	q.sigma <- list(mean=sum(sigma.wts*sigma), 
 		sd=sqrt(sum(sigma.wts*(sigma-q.sigma$sd)^2)))
+
 }
 
-
-
-# Posterior via importance sampling
+# Posterior of mu via importance sampling
 mu.is <- sample(1:n.samp,10000,mu.wts,replace=TRUE)
 mu.is <- c(mu[mu.is,])
 hist(mu.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=mu.true,lty=2)
 
+# Posterior of sigma via importance sampling
 sigma.is <- sample(1:n.samp,10000,sigma.wts,replace=TRUE)
 sigma.is <- sigma[sigma.is]
 hist(sigma.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=sigma.true,lty=2)
