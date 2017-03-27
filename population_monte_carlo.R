@@ -220,7 +220,7 @@ abline(v=mean(y),lty=2,lwd=2,col=2)
 
 
 ####################################################################
-### Mixture of Guassians example of Cappe et al. (2004)
+### Mixture of Guassians example a la Cappe et al. (2004) with mixure importance function
 ####################################################################
 
 rm(list=ls())
@@ -300,16 +300,22 @@ for(k in 1:K){ # loop through iterations
 	mu.wts <- exp(log.lik+prior-q.density-max(log.lik))
 	mu.wts <- mu.wts/sum(mu.wts)
 
-	# contour(interp(x=mu[,1],y=mu[,2],z=wts))
+	# contour(interp(x=mu[,1],y=mu[,2],z=mu.wts))
 	# abline(v=mu.true[1],h=mu.true[2],col=2)
 
 	# Update parameters of importance function for mu
 	p.tmp <- colSums(mu.wts*rho)
 	q.mu <- list(mean=colSums((mu.wts*mu)*rho)/p.tmp,
-		sd=sqrt(colSums(mu.wts*t(apply(mu,1,function(x) x-q.mu$mean))^2*rho)/p.tmp))
+		sd=sqrt(colSums(mu.wts*t(apply(mu,1,function(x) x-q.mu$mean))^2*rho)/p.tmp),
+		p=p.tmp)
 # p.tmp
 # q.mu	
 
+	###
+	### Update p
+	### 
+	
+	#???
 	
 	###
 	### Update sigma
@@ -343,7 +349,7 @@ sigma.is <- sample(1:n.samp,10000,sigma.wts,replace=TRUE)
 sigma.is <- sigma[sigma.is]
 hist(sigma.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=sigma.true,lty=2)
 
-# Class memberships
+# Class memberships???
 lik <- sapply(1:J,function(x) dnorm(y,q.mu$mean[x],q.sigma$mean))
 test <- lik/rowSums(lik)
 idx <- apply(test,1,function(x) sample(1:J,1,prob=x))
