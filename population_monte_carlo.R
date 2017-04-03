@@ -29,7 +29,7 @@ mcmc <- function(y,sigma,lambda,n.mcmc=1000){  # estimate mu via MCMC
 ### Simulate observations
 ###
 
-n <- 100  # sample size
+n <- 1000  # sample size
 mu.true <- 0  # mean
 sigma.true <- 1  # standarad deviation
 y <- rnorm(n,mu.true,sigma.true)
@@ -196,7 +196,7 @@ for(k in 1:K){ # loop through iterations
 	# rho <- rho/matrix(rowSums(rho),nrow(rho),ncol(rho))  
 	rho <- exp(log(rho)-log(rowSums(rho)))  # avoid numerical underflow
 	w <- wts(y,mu,sigma.true,  # importance weights
-		q=list(mu.q,sigma.q,p.q),priors=list(theta,lambda))  
+		q=list(mu.q,sigma.q,p.q),priors=list(theta,lambda)) 
 	# p.q <- colSums(w*rho)  # update mixture probabilities
 	p.q <- colSums(exp(log(w)+log(rho)))  # avoid numerical underflow
 	mu.q <- colSums((w*mu)*rho)/p.q  # update means of mixture components
@@ -246,7 +246,7 @@ n <- 1000 # sample size
 mu.true <- c(0,2)  # mean
 sigma.true <- 0.5  # standarad deviation
 p.true <- c(0.2,1-0.2)  # mixture proportions
-J <- length(mu.true)  # number of mixture components in model
+K <- length(mu.true)  # number of mixture components in model
 
 idx <- sample(1:J,n,replace=TRUE,prob=p.true)  # mixture component idx
 y <- rnorm(n,mu.true[idx],sigma.true)  # simulated observations
@@ -270,27 +270,27 @@ b <- 10  # upper bound for uniform prior on sigma
 
 n.samp <- 10000  # sample size from importance function
 
-q.mu <- list(mean=rep(0,J),sd=rep(2,J),p=rep(1/J,J))  # parameters of importance fxn for mu
-# q.mu <- list(mean=mu.true,sd=rep(sigma.true,J),p=p.true)  # parameters of importance fxn for mu
+q.mu <- list(mean=rep(0,K),sd=rep(2,K),p=rep(1/K,K))  # parameters of importance fxn for mu
+# q.mu <- list(mean=mu.true,sd=rep(sigma.true,K),p=p.true)  # parameters of importance fxn for mu
 q.sigma <- list(mean=1,sd=0.5)  # parameters of importance fxn for sigma
 
 
 ###
-### Stesp 1-K: Update importance function, sample mu, calculate importance weights
+### Stesp 1-T: Update importance function, sample mu, calculate importance weights
 ###
 
-K <- 10  # number of iterations
-for(k in 1:K){ # loop through iterations
+T <- 10  # number of iterations
+for(t in 1:T){ # loop through iterations
 	
 	###
 	### Update mu
 	### 
 
 	# Sample mu from importance function
-	mu <- sapply(1:J,function(x) rnorm(n.samp,q.mu$mean[x],q.mu$sd[x]))
+	mu <- sapply(1:K,function(x) rnorm(n.samp,q.mu$mean[x],q.mu$sd[x]))
 
 	# Calculate posterior probability of mixture component membership
-	rho.tmp <- sapply(1:J,function(x) p.true[x]*dnorm(mu[,x],q.mu$mean[x],q.mu$sd[x],log=FALSE))
+	rho.tmp <- sapply(1:K,function(x) p.true[x]*dnorm(mu[,x],q.mu$mean[x],q.mu$sd[x],log=FALSE))
 	q.density <- log(rowSums(rho.tmp))
 	rho <- exp(log(rho.tmp)-q.density)
 	
@@ -304,10 +304,9 @@ for(k in 1:K){ # loop through iterations
 	# abline(v=mu.true[1],h=mu.true[2],col=2)
 
 	# Update parameters of importance function for mu
-	p.tmp <- colSums(mu.wts*rho)
-	q.mu <- list(mean=colSums((mu.wts*mu)*rho)/p.tmp,
-		sd=sqrt(colSums(mu.wts*t(apply(mu,1,function(x) x-q.mu$mean))^2*rho)/p.tmp),
-		p=p.tmp)
+	q.mu$p <- colSums(mu.wts*rho)	
+	q.mu$mean <- colSums((mu.wts*mu)*rho)/q.mu$p
+	q.mu$sd <- sqrt(sapply(1:K,function(x) sum(mu.wts*(mu[,x]-q.mu$mean[x])^2*rho[,x])/q.mu$p[x]))
 # p.tmp
 # q.mu	
 
@@ -343,6 +342,8 @@ for(k in 1:K){ # loop through iterations
 mu.is <- sample(1:n.samp,10000,mu.wts,replace=TRUE)
 mu.is <- c(mu[mu.is,])
 hist(mu.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=mu.true,lty=2)
+hist(mu.is,breaks=1000,prob=TRUE,col=rgb(1,0,0,0.25),xlim=c(-0.25,0.25));abline(v=mu.true,lty=2)
+hist(mu.is,breaks=1000,prob=TRUE,col=rgb(1,0,0,0.25),xlim=c(1.75,2.25));abline(v=mu.true,lty=2)
 
 # Posterior of sigma via importance sampling
 sigma.is <- sample(1:n.samp,10000,sigma.wts,replace=TRUE)
@@ -350,9 +351,16 @@ sigma.is <- sigma[sigma.is]
 hist(sigma.is,breaks=100,prob=TRUE,col=rgb(1,0,0,0.25));abline(v=sigma.true,lty=2)
 
 # Class memberships???
-lik <- sapply(1:J,function(x) dnorm(y,q.mu$mean[x],q.sigma$mean))
+lik <- sapply(1:K,function(x) dnorm(y,q.mu$mean[x],q.sigma$mean))
 test <- lik/rowSums(lik)
 idx <- apply(test,1,function(x) sample(1:J,1,prob=x))
 table(idx)
 boxplot(y~idx);abline(h=mu.true,col=2)
 plot(y,test[,1]);points(y,test[,2],col=2)
+
+
+
+source('~/Documents/personal/coursework/csu/FW 673/biweek 4/code/mixture/finch.MCMC.R')
+mcmc.out=finch.MCMC(y,10000,.1,z.known=ifelse(idx==1,1,0))
+hist(c(mcmc.out$mu.mat),breaks=1000,prob=TRUE,add=TRUE)
+hist(c(mcmc.out$s),breaks=1000,prob=TRUE,add=TRUE,col="gray")
